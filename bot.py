@@ -3,7 +3,7 @@
 
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
-║   ULTIMATE MEGA BOT – v13.6 – 1040+ FEATURES – PREMIUM EDITION        ║
+║   ULTIMATE MEGA BOT – v13.7 – 1040+ FEATURES – PREMIUM EDITION        ║
 ║   ⚡ 1000x Speed  🔥 Enterprise‑Grade  🛡️ Military‑Grade Security      ║
 ║   👑 Developer: DK Sharma  |  📌 Admin: @OfficalEarningZone            ║
 ║   🔐 Per‑User Report Login  |  🛡️ Zero Runtime Errors (Fixed Global)  ║
@@ -30,20 +30,29 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional, Tuple
 
+# ---------- Environment Config (BEFORE imports that need them) ----------
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8693119356:AAFD5dhQUSKPTCxcsuf9b1uHlgLKmsGcVS0")
+ADMIN_IDS = [int(x.strip()) for x in os.environ.get("ADMIN_IDS", "5888777479").split(",") if x.strip().isdigit()]
+
+# ---------- Third Party Imports ----------
 import aiohttp
 import requests
 from aiohttp import ClientTimeout, TCPConnector
 
 # Telegram bot
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup,
-    ReplyKeyboardMarkup, KeyboardButton
-)
-from telegram.constants import ParseMode
-from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler,
-    MessageHandler, filters, ContextTypes
-)
+try:
+    from telegram import (
+        Update, InlineKeyboardButton, InlineKeyboardMarkup,
+        ReplyKeyboardMarkup, KeyboardButton
+    )
+    from telegram.constants import ParseMode
+    from telegram.ext import (
+        Application, CommandHandler, CallbackQueryHandler,
+        MessageHandler, filters, ContextTypes
+    )
+except ImportError as e:
+    print(f"Error importing telegram: {e}")
+    sys.exit(1)
 
 # Optional dependencies (graceful fallback)
 try:
@@ -81,10 +90,6 @@ logging.basicConfig(
 logger = logging.getLogger("MegaBot")
 logger.setLevel(logging.INFO)
 
-# ---------- Environment Config ----------
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8996787632:AAFxuoXysrlhOVBgoC-MlbPETZOOMkJZ7ww")
-ADMIN_IDS = [int(x.strip()) for x in os.environ.get("ADMIN_IDS", "5888777479").split(",") if x.strip().isdigit()]
-
 # Module settings
 REG_DEFAULT_REFERRAL = "1816"
 REG_DEFAULT_PASSWORD = "Test@123"
@@ -118,191 +123,196 @@ BOT_START_TIME = datetime.now()
 # ---------- Database Initialisation ----------
 async def init_all_dbs():
     """Create all database tables for every module."""
-    # Registration DB
-    async with aiosqlite.connect(REG_DB_PATH) as db:
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS registrations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                email TEXT UNIQUE,
-                password TEXT,
-                referral TEXT,
-                authorized_key TEXT,
-                user_id TEXT,
-                status TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS whitelist (
-                user_id INTEGER PRIMARY KEY,
-                approved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS pending_requests (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        await db.commit()
+    try:
+        # Registration DB
+        async with aiosqlite.connect(REG_DB_PATH) as db:
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS registrations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    email TEXT UNIQUE,
+                    password TEXT,
+                    referral TEXT,
+                    authorized_key TEXT,
+                    user_id TEXT,
+                    status TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS whitelist (
+                    user_id INTEGER PRIMARY KEY,
+                    approved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS pending_requests (
+                    user_id INTEGER PRIMARY KEY,
+                    username TEXT,
+                    requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            await db.commit()
 
-    # Referral DB
-    async with aiosqlite.connect(REF_DB_PATH) as db:
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS registrations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                mobile TEXT UNIQUE,
-                platform TEXT,
-                invite_used TEXT,
-                telegram_id INTEGER,
-                registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        await db.commit()
+        # Referral DB
+        async with aiosqlite.connect(REF_DB_PATH) as db:
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS registrations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    mobile TEXT UNIQUE,
+                    platform TEXT,
+                    invite_used TEXT,
+                    telegram_id INTEGER,
+                    registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            await db.commit()
 
-    # Unban DB
-    async with aiosqlite.connect(UNBAN_DB_PATH) as db:
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                tid INTEGER PRIMARY KEY,
-                name TEXT,
-                email TEXT,
-                password TEXT,
-                reason TEXT DEFAULT 'personal communication',
-                delay REAL DEFAULT 1,
-                approved INTEGER DEFAULT 0,
-                email_valid INTEGER DEFAULT 1,
-                banned INTEGER DEFAULT 0,
-                language TEXT DEFAULT 'en',
-                requested_at DATETIME,
-                last_active DATETIME,
-                total_appeals INTEGER DEFAULT 0,
-                success_appeals INTEGER DEFAULT 0,
-                failed_appeals INTEGER DEFAULT 0,
-                smtp_host TEXT DEFAULT 'smtp.gmail.com',
-                smtp_port INTEGER DEFAULT 587,
-                support_email TEXT DEFAULT 'support@whatsapp.com'
-            )
-        ''')
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS numbers (
-                phone TEXT PRIMARY KEY,
-                tid INTEGER,
-                last_appeal DATETIME,
-                appeal_count INTEGER DEFAULT 0,
-                blacklisted INTEGER DEFAULT 0,
-                custom_reason TEXT,
-                FOREIGN KEY(tid) REFERENCES users(tid)
-            )
-        ''')
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            )
-        ''')
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS user_templates (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tid INTEGER,
-                template TEXT,
-                is_default INTEGER DEFAULT 0,
-                FOREIGN KEY(tid) REFERENCES users(tid)
-            )
-        ''')
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS appeal_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tid INTEGER,
-                phone TEXT,
-                success INTEGER,
-                error TEXT,
-                sent_at DATETIME,
-                template_used TEXT,
-                method TEXT,
-                FOREIGN KEY(tid) REFERENCES users(tid)
-            )
-        ''')
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS scheduler_jobs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tid INTEGER,
-                cron_expr TEXT,
-                interval_minutes INTEGER,
-                next_run DATETIME,
-                active INTEGER DEFAULT 1,
-                last_run DATETIME,
-                FOREIGN KEY(tid) REFERENCES users(tid)
-            )
-        ''')
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS proxies (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                proxy TEXT UNIQUE,
-                last_used DATETIME,
-                success_count INTEGER DEFAULT 0,
-                fail_count INTEGER DEFAULT 0
-            )
-        ''')
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS rate_limit (
-                tid INTEGER,
-                action TEXT,
-                timestamp DATETIME,
-                PRIMARY KEY (tid, action, timestamp)
-            )
-        ''')
-        defaults = [
-            ('global_delay', '1'),
-            ('last_backup', ''),
-            ('proxy_list', ''),
-            ('captcha_api_key', ''),
-            ('smtp_host', 'smtp.gmail.com'),
-            ('smtp_port', '587'),
-            ('support_emails', 'support@whatsapp.com,support@meta.com'),
-            ('auto_backup_interval', '24'),
-            ('enable_dashboard', 'true')
-        ]
-        for k, v in defaults:
-            await db.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
-        cur = await db.execute("SELECT COUNT(*) FROM user_templates WHERE is_default=1")
-        if (await cur.fetchone())[0] == 0:
-            templates = []
-            for i in range(1, 101):
-                templates.append(f"Appeal #{i}: My number {{number}} is banned. I use it for {{reason}}. Please help. {{name}}")
-            for t in set(templates):
-                await db.execute("INSERT INTO user_templates (tid, template, is_default) VALUES (0, ?, 1)", (t,))
-        await db.commit()
+        # Unban DB
+        async with aiosqlite.connect(UNBAN_DB_PATH) as db:
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    tid INTEGER PRIMARY KEY,
+                    name TEXT,
+                    email TEXT,
+                    password TEXT,
+                    reason TEXT DEFAULT 'personal communication',
+                    delay REAL DEFAULT 1,
+                    approved INTEGER DEFAULT 0,
+                    email_valid INTEGER DEFAULT 1,
+                    banned INTEGER DEFAULT 0,
+                    language TEXT DEFAULT 'en',
+                    requested_at DATETIME,
+                    last_active DATETIME,
+                    total_appeals INTEGER DEFAULT 0,
+                    success_appeals INTEGER DEFAULT 0,
+                    failed_appeals INTEGER DEFAULT 0,
+                    smtp_host TEXT DEFAULT 'smtp.gmail.com',
+                    smtp_port INTEGER DEFAULT 587,
+                    support_email TEXT DEFAULT 'support@whatsapp.com'
+                )
+            ''')
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS numbers (
+                    phone TEXT PRIMARY KEY,
+                    tid INTEGER,
+                    last_appeal DATETIME,
+                    appeal_count INTEGER DEFAULT 0,
+                    blacklisted INTEGER DEFAULT 0,
+                    custom_reason TEXT,
+                    FOREIGN KEY(tid) REFERENCES users(tid)
+                )
+            ''')
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            ''')
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS user_templates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tid INTEGER,
+                    template TEXT,
+                    is_default INTEGER DEFAULT 0,
+                    FOREIGN KEY(tid) REFERENCES users(tid)
+                )
+            ''')
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS appeal_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tid INTEGER,
+                    phone TEXT,
+                    success INTEGER,
+                    error TEXT,
+                    sent_at DATETIME,
+                    template_used TEXT,
+                    method TEXT,
+                    FOREIGN KEY(tid) REFERENCES users(tid)
+                )
+            ''')
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS scheduler_jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tid INTEGER,
+                    cron_expr TEXT,
+                    interval_minutes INTEGER,
+                    next_run DATETIME,
+                    active INTEGER DEFAULT 1,
+                    last_run DATETIME,
+                    FOREIGN KEY(tid) REFERENCES users(tid)
+                )
+            ''')
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS proxies (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    proxy TEXT UNIQUE,
+                    last_used DATETIME,
+                    success_count INTEGER DEFAULT 0,
+                    fail_count INTEGER DEFAULT 0
+                )
+            ''')
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS rate_limit (
+                    tid INTEGER,
+                    action TEXT,
+                    timestamp DATETIME,
+                    PRIMARY KEY (tid, action, timestamp)
+                )
+            ''')
+            defaults = [
+                ('global_delay', '1'),
+                ('last_backup', ''),
+                ('proxy_list', ''),
+                ('captcha_api_key', ''),
+                ('smtp_host', 'smtp.gmail.com'),
+                ('smtp_port', '587'),
+                ('support_emails', 'support@whatsapp.com,support@meta.com'),
+                ('auto_backup_interval', '24'),
+                ('enable_dashboard', 'true')
+            ]
+            for k, v in defaults:
+                await db.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
+            cur = await db.execute("SELECT COUNT(*) FROM user_templates WHERE is_default=1")
+            if (await cur.fetchone())[0] == 0:
+                templates = []
+                for i in range(1, 101):
+                    templates.append(f"Appeal #{i}: My number {{number}} is banned. I use it for {{reason}}. Please help. {{name}}")
+                for t in set(templates):
+                    await db.execute("INSERT INTO user_templates (tid, template, is_default) VALUES (0, ?, 1)", (t,))
+            await db.commit()
 
-    # Report DB
-    async with aiosqlite.connect(REPORT_DB_PATH) as db:
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                premium_expiry INTEGER DEFAULT 0,
-                blocked INTEGER DEFAULT 0,
-                joined INTEGER DEFAULT 0
-            )
-        ''')
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS codes (
-                code TEXT PRIMARY KEY,
-                duration_hours INTEGER,
-                used_by INTEGER DEFAULT 0,
-                used_at INTEGER DEFAULT 0
-            )
-        ''')
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS report_sessions (
-                user_id INTEGER PRIMARY KEY,
-                session_string TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        await db.commit()
+        # Report DB
+        async with aiosqlite.connect(REPORT_DB_PATH) as db:
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY,
+                    premium_expiry INTEGER DEFAULT 0,
+                    blocked INTEGER DEFAULT 0,
+                    joined INTEGER DEFAULT 0
+                )
+            ''')
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS codes (
+                    code TEXT PRIMARY KEY,
+                    duration_hours INTEGER,
+                    used_by INTEGER DEFAULT 0,
+                    used_at INTEGER DEFAULT 0
+                )
+            ''')
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS report_sessions (
+                    user_id INTEGER PRIMARY KEY,
+                    session_string TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            await db.commit()
 
-    logger.info("All databases initialised.")
+        logger.info("All databases initialised.")
+        return True
+    except Exception as e:
+        logger.error(f"Database initialisation error: {e}")
+        return False
 
 # ---------- Persistent Main Menu Keyboard ----------
 def get_main_keyboard() -> ReplyKeyboardMarkup:
@@ -483,11 +493,17 @@ async def run_registration(update: Update, count: int, referral: str):
             if processed % 100 == 0 or processed == count:
                 elapsed = time.time() - start_time
                 rate = processed / elapsed if elapsed > 0 else 0
-                await update.message.reply_text(
-                    f"📊 Progress: {processed}/{count} | ✅ {success} | ❌ {fail} | ⚡ {rate:.1f}/s"
-                )
+                try:
+                    await update.message.reply_text(
+                        f"📊 Progress: {processed}/{count} | ✅ {success} | ❌ {fail} | ⚡ {rate:.1f}/s"
+                    )
+                except Exception as e:
+                    logger.error(f"Progress update error: {e}")
     REG_RUNNING = False
-    await update.message.reply_text("✅ Registration completed.")
+    try:
+        await update.message.reply_text("✅ Registration completed.")
+    except Exception as e:
+        logger.error(f"Completion message error: {e}")
 
 async def reg_register_one(session, email, password, referral, proxy=None):
     payload = {
@@ -1648,7 +1664,11 @@ def main():
     global APPLICATION, REG_PROXY_MANAGER, UNBAN_AUTO_ENGINE
 
     # Initialize databases
-    asyncio.run(init_all_dbs())
+    try:
+        asyncio.run(init_all_dbs())
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        # Continue anyway - the bot might still work with some features
 
     REG_PROXY_MANAGER = RegProxyManager()
 
@@ -1679,7 +1699,10 @@ def main():
                         if n[3]: continue
                         ok, msg = await unban_send_email(tid, n[0], user["name"] or "User", user["reason"] or "personal communication")
                         if APPLICATION:
-                            await APPLICATION.bot.send_message(tid, f"{'✅' if ok else '❌'} {n[0]}: {msg}")
+                            try:
+                                await APPLICATION.bot.send_message(tid, f"{'✅' if ok else '❌'} {n[0]}: {msg}")
+                            except Exception as e:
+                                logger.error(f"Failed to send message to {tid}: {e}")
                         await asyncio.sleep(user["delay"] if user else 1.0)
                 except asyncio.CancelledError:
                     break
@@ -1689,8 +1712,12 @@ def main():
     UNBAN_AUTO_ENGINE = SimpleAutoEngine()
 
     # Build application
-    application = Application.builder().token(BOT_TOKEN).build()
-    APPLICATION = application
+    try:
+        application = Application.builder().token(BOT_TOKEN).build()
+        APPLICATION = application
+    except Exception as e:
+        logger.critical(f"Failed to build application: {e}")
+        sys.exit(1)
 
     # Add handlers
     application.add_handler(CommandHandler("start", module_start))
@@ -1704,12 +1731,15 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_global_text))
     application.add_handler(CallbackQueryHandler(global_callback_handler, pattern="^"))
 
-    # Start polling
+    # Start polling with better error handling
     try:
+        logger.info("🚀 Mega Bot is starting...")
         application.run_polling()
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
     except Exception as e:
         logger.critical(f"Bot crashed: {e}", exc_info=True)
-        raise
+        sys.exit(1)
 
 # ---------- Global Message Router ----------
 async def handle_global_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
