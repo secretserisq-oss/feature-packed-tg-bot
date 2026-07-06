@@ -3,11 +3,11 @@
 
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
-║   ULTIMATE MEGA BOT – v13.7 – 1040+ FEATURES – PREMIUM EDITION        ║
+║   ULTIMATE MEGA BOT – v13.8 – 1040+ FEATURES – PREMIUM EDITION        ║
 ║   ⚡ 1000x Speed  🔥 Enterprise‑Grade  🛡️ Military‑Grade Security      ║
 ║   👑 Developer: DK Sharma  |  📌 Admin: @OfficalEarningZone            ║
-║   🔐 Per‑User Report Login  |  🛡️ Zero Runtime Errors (Fixed Global)  ║
-║   🎯 40+ New Utility/Fun Commands Added                               ║
+║   🔐 Per‑User Report Login with Custom API                            ║
+║   🛡️ Zero Runtime Errors (Fixed Global)                               ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -23,6 +23,7 @@ import re
 import smtplib
 import sqlite3
 import string
+import sys
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -30,7 +31,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional, Tuple
 
-# ---------- Environment Config (BEFORE imports that need them) ----------
+# ---------- Environment Config ----------
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8693119356:AAFD5dhQUSKPTCxcsuf9b1uHlgLKmsGcVS0")
 ADMIN_IDS = [int(x.strip()) for x in os.environ.get("ADMIN_IDS", "5888777479").split(",") if x.strip().isdigit()]
 
@@ -48,28 +49,18 @@ try:
     from telegram.constants import ParseMode
     from telegram.ext import (
         Application, CommandHandler, CallbackQueryHandler,
-        MessageHandler, filters, ContextTypes
+        MessageHandler, filters, ContextTypes, ConversationHandler
     )
 except ImportError as e:
     print(f"Error importing telegram: {e}")
     sys.exit(1)
 
-# Optional dependencies (graceful fallback)
+# Optional dependencies
 try:
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     APSCHEDULER_AVAILABLE = True
 except ImportError:
     APSCHEDULER_AVAILABLE = False
-
-try:
-    from selenium import webdriver
-    from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.support import expected_conditions as EC
-    SELENIUM_AVAILABLE = True
-except ImportError:
-    SELENIUM_AVAILABLE = False
 
 try:
     from telethon import TelegramClient
@@ -90,7 +81,7 @@ logging.basicConfig(
 logger = logging.getLogger("MegaBot")
 logger.setLevel(logging.INFO)
 
-# Module settings
+# ---------- Module Settings ----------
 REG_DEFAULT_REFERRAL = "1816"
 REG_DEFAULT_PASSWORD = "Test@123"
 REG_VERIFY_CODE = "7777"
@@ -103,26 +94,17 @@ REF_REX_INVITE = "O6NVYX"
 REF_DB_PATH = "referrals.db"
 
 UNBAN_DB_PATH = "appeals.db"
-UNBAN_DEFAULT_DELAY = 1.0
-UNBAN_MAX_RETRIES = 3
-UNBAN_MAX_CONCURRENT_SENDS = 5
-UNBAN_RATE_LIMIT_SECONDS = 60
-UNBAN_RATE_LIMIT_CALLS = 20
-
 REPORT_DB_PATH = "report_data.db"
 REPORT_DEFAULT_MAX = 20000
 REPORT_MAX_TARGETS = 10
 
-API_ID = int(os.environ.get("API_ID", 32956022))
-API_HASH = os.environ.get("API_HASH", "5853b9eed0e062cebce5e46203f767ac")
-
-# ---------- Global Application Reference ----------
+# ---------- Global Variables ----------
 APPLICATION = None
 BOT_START_TIME = datetime.now()
 
 # ---------- Database Initialisation ----------
 async def init_all_dbs():
-    """Create all database tables for every module."""
+    """Create all database tables."""
     try:
         # Registration DB
         async with aiosqlite.connect(REG_DB_PATH) as db:
@@ -303,6 +285,8 @@ async def init_all_dbs():
                 CREATE TABLE IF NOT EXISTS report_sessions (
                     user_id INTEGER PRIMARY KEY,
                     session_string TEXT,
+                    api_id INTEGER,
+                    api_hash TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
@@ -880,37 +864,12 @@ async def unban_send_email(tid: int, phone: str, name: str, reason: str, custom_
         return False, str(e)
 
 async def unban_submit_webform(tid: int, phone: str):
-    if not SELENIUM_AVAILABLE:
-        return False, "Selenium not installed."
-    user = await unban_get_user(tid)
-    if not user:
-        return False, "User not found."
     try:
-        options = Options()
-        options.add_argument("--headless")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        driver = webdriver.Chrome(options=options)
-        driver.get("https://www.whatsapp.com/contact")
-        wait = WebDriverWait(driver, 10)
-        try:
-            phone_input = wait.until(EC.presence_of_element_located((By.NAME, "phoneNumber")))
-            phone_input.send_keys(phone.replace("+91", ""))
-        except: pass
-        try:
-            email_input = driver.find_element(By.NAME, "email")
-            email_input.send_keys(user["email"])
-        except: pass
-        try:
-            textarea = driver.find_element(By.TAG_NAME, "textarea")
-            textarea.send_keys(f"My number {phone} is banned. Please unban.")
-        except: pass
-        try:
-            submit_btn = driver.find_element(By.XPATH, "//button[@type='submit']")
-            submit_btn.click()
-        except: pass
-        driver.quit()
-        return True, "Web form submitted (may require CAPTCHA)."
+        # Simple fallback - just send email
+        user = await unban_get_user(tid)
+        if not user:
+            return False, "User not found"
+        return await unban_send_email(tid, phone, user.get("name", "User"), user.get("reason", "personal communication"))
     except Exception as e:
         return False, str(e)
 
@@ -1167,22 +1126,28 @@ def bancheck_check_player(uid, region):
     except Exception as e:
         return {"error": str(e)}
 
-# ========== REPORT MODULE ==========
+# ========== REPORT MODULE - FIXED WITH USER API ==========
 REPORT_SESSIONS = {}
 REPORT_CLIENTS = {}
 
-# Conversation states
-REPORT_LOGIN_PHONE, REPORT_LOGIN_OTP = range(2)
+# Conversation states for Report Bot
+REPORT_API_ID, REPORT_API_HASH, REPORT_PHONE, REPORT_OTP = range(4)
 
-async def get_report_session(user_id: int) -> Optional[str]:
+async def get_report_session(user_id: int) -> Optional[dict]:
+    """Get user's report session data including API credentials"""
     async with aiosqlite.connect(REPORT_DB_PATH) as db:
-        cur = await db.execute("SELECT session_string FROM report_sessions WHERE user_id = ?", (user_id,))
+        cur = await db.execute("SELECT session_string, api_id, api_hash FROM report_sessions WHERE user_id = ?", (user_id,))
         row = await cur.fetchone()
-        return row[0] if row else None
+        if row:
+            return {"session": row[0], "api_id": row[1], "api_hash": row[2]}
+        return None
 
-async def save_report_session(user_id: int, session_string: str):
+async def save_report_session(user_id: int, session_string: str, api_id: int, api_hash: str):
     async with aiosqlite.connect(REPORT_DB_PATH) as db:
-        await db.execute("INSERT OR REPLACE INTO report_sessions (user_id, session_string) VALUES (?, ?)", (user_id, session_string))
+        await db.execute(
+            "INSERT OR REPLACE INTO report_sessions (user_id, session_string, api_id, api_hash) VALUES (?, ?, ?, ?)",
+            (user_id, session_string, api_id, api_hash)
+        )
         await db.commit()
 
 async def delete_report_session(user_id: int):
@@ -1197,13 +1162,20 @@ async def delete_report_session(user_id: int):
         del REPORT_CLIENTS[user_id]
 
 async def get_user_report_client(user_id: int) -> Optional[TelegramClient]:
+    """Get or create Telethon client for user using their own API credentials"""
     if user_id in REPORT_CLIENTS and REPORT_CLIENTS[user_id].is_connected():
         return REPORT_CLIENTS[user_id]
-    session_str = await get_report_session(user_id)
-    if not session_str:
+    
+    session_data = await get_report_session(user_id)
+    if not session_data or not session_data["session"]:
         return None
-    client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
+    
     try:
+        client = TelegramClient(
+            StringSession(session_data["session"]),
+            session_data["api_id"],
+            session_data["api_hash"]
+        )
         await client.connect()
         if not await client.is_user_authorized():
             await delete_report_session(user_id)
@@ -1215,8 +1187,8 @@ async def get_user_report_client(user_id: int) -> Optional[TelegramClient]:
         return None
 
 async def build_report_keyboard(user_id: int) -> Tuple[InlineKeyboardMarkup, bool]:
-    session = await get_report_session(user_id)
-    logged_in = session is not None
+    session_data = await get_report_session(user_id)
+    logged_in = session_data is not None
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔑 Login" if not logged_in else "🔄 Refresh Session", callback_data="report_login")],
         [InlineKeyboardButton("🚪 Logout" if logged_in else "❌", callback_data="report_logout")],
@@ -1238,68 +1210,154 @@ async def report_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard, logged_in = await build_report_keyboard(user_id)
     login_status = "✅ Logged in" if logged_in else "🔑 Not Logged In"
     await query.edit_message_text(
-        f"🚨 *Report Bot*\n\nStatus: {login_status}\n\nReport scam channels to Telegram.\nSet targets, max reports, and speed.",
+        f"🚨 *Report Bot*\n\nStatus: {login_status}\n\n"
+        "Report scam channels to Telegram.\n"
+        "First login with your own Telegram API credentials.\n\n"
+        "📌 *How to get API credentials:*\n"
+        "1. Go to https://my.telegram.org\n"
+        "2. Login with your Telegram account\n"
+        "3. Go to 'API Development Tools'\n"
+        "4. Create a new application\n"
+        "5. Get your API ID and API Hash",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=keyboard
     )
 
 async def report_login_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start login flow - ask for API ID"""
     query = update.callback_query
     await query.answer()
     await query.edit_message_text(
         "📱 *Login to Report Bot*\n\n"
-        "You need to log in with your own Telegram account to report channels.\n"
-        "Enter your phone number (with country code):\nExample: `+911234567890`"
+        "Please enter your **API ID** from my.telegram.org:\n"
+        "Example: `12345678`\n\n"
+        "Type `/cancel` to cancel.",
+        parse_mode=ParseMode.MARKDOWN
     )
-    context.user_data["report_login_state"] = "phone"
-    return
+    return REPORT_API_ID
+
+async def report_login_api_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive API ID"""
+    try:
+        api_id = int(update.message.text.strip())
+        if api_id < 1 or api_id > 999999999:
+            await update.message.reply_text("❌ Invalid API ID. Please enter a valid number.")
+            return REPORT_API_ID
+        context.user_data["report_api_id"] = api_id
+        await update.message.reply_text(
+            "✅ API ID saved!\n\n"
+            "Now enter your **API Hash** from my.telegram.org:\n"
+            "Example: `5853b9eed0e062cebce5e46203f767ac`"
+        )
+        return REPORT_API_HASH
+    except ValueError:
+        await update.message.reply_text("❌ Please enter a valid number for API ID.")
+        return REPORT_API_ID
+
+async def report_login_api_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive API Hash"""
+    api_hash = update.message.text.strip()
+    if len(api_hash) < 20:
+        await update.message.reply_text("❌ Invalid API Hash. Please enter a valid hash (at least 20 characters).")
+        return REPORT_API_HASH
+    context.user_data["report_api_hash"] = api_hash
+    await update.message.reply_text(
+        "✅ API Hash saved!\n\n"
+        "Now enter your **Phone Number** with country code:\n"
+        "Example: `+911234567890`"
+    )
+    return REPORT_PHONE
 
 async def report_login_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive Phone Number and send OTP"""
     phone = update.message.text.strip()
     if not phone.startswith("+"):
-        await update.message.reply_text("❌ Please include country code (e.g., +91).")
-        return
-    context.user_data["report_login_phone"] = phone
+        await update.message.reply_text("❌ Please include country code (e.g., +91 for India).")
+        return REPORT_PHONE
+    context.user_data["report_phone"] = phone
+    
+    api_id = context.user_data.get("report_api_id")
+    api_hash = context.user_data.get("report_api_hash")
+    
+    if not api_id or not api_hash:
+        await update.message.reply_text("❌ API credentials missing. Please start over with /report_login")
+        return ConversationHandler.END
+    
     try:
-        client = TelegramClient(StringSession(), API_ID, API_HASH)
+        client = TelegramClient(StringSession(), api_id, api_hash)
         await client.connect()
         await client.send_code_request(phone)
-        context.user_data["report_login_client"] = client
-        await update.message.reply_text("✅ Code sent! Please enter the OTP you received:")
-        context.user_data["report_login_state"] = "otp"
+        context.user_data["report_client"] = client
+        await update.message.reply_text(
+            "✅ Verification code sent!\n\n"
+            "Please enter the **OTP** you received:\n"
+            "Example: `12345`"
+        )
+        return REPORT_OTP
     except Exception as e:
-        await update.message.reply_text(f"❌ Error sending code: {e}")
-        context.user_data.pop("report_login_state", None)
+        await update.message.reply_text(f"❌ Error sending code: {e}\n\nPlease check your API credentials and try again.")
+        # Clear partial data
+        context.user_data.pop("report_api_id", None)
+        context.user_data.pop("report_api_hash", None)
+        context.user_data.pop("report_phone", None)
+        return ConversationHandler.END
 
 async def report_login_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Verify OTP and save session"""
     otp = update.message.text.strip()
-    client = context.user_data.get("report_login_client")
-    phone = context.user_data.get("report_login_phone")
+    client = context.user_data.get("report_client")
+    phone = context.user_data.get("report_phone")
+    api_id = context.user_data.get("report_api_id")
+    api_hash = context.user_data.get("report_api_hash")
+    
     if not client:
         await update.message.reply_text("❌ Session expired. Please start over with /report_login")
-        return
+        return ConversationHandler.END
+    
     try:
         await client.sign_in(phone, otp)
         session_str = client.session.save()
         user_id = update.effective_user.id
-        await save_report_session(user_id, session_str)
+        
+        # Save session with user's API credentials
+        await save_report_session(user_id, session_str, api_id, api_hash)
         REPORT_CLIENTS[user_id] = client
+        
         await update.message.reply_text("✅ Login successful! You can now use the Report Bot.")
+        
+        # Show report menu
         keyboard, logged_in = await build_report_keyboard(user_id)
         await update.message.reply_text(
             "🚨 *Report Bot Menu*",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=keyboard
         )
+        
+        # Clear conversation data
+        context.user_data.pop("report_api_id", None)
+        context.user_data.pop("report_api_hash", None)
+        context.user_data.pop("report_phone", None)
+        context.user_data.pop("report_client", None)
+        
+        return ConversationHandler.END
+        
     except SessionPasswordNeededError:
-        await update.message.reply_text("⚠️ 2FA is enabled. Please send your password:")
-        context.user_data["report_login_state"] = "password"
+        await update.message.reply_text("⚠️ 2FA is enabled. Please enter your 2FA password:")
+        context.user_data["report_2fa"] = True
+        return REPORT_OTP
     except Exception as e:
         await update.message.reply_text(f"❌ Login failed: {e}")
-    finally:
-        context.user_data.pop("report_login_state", None)
-        context.user_data.pop("report_login_client", None)
-        context.user_data.pop("report_login_phone", None)
+        return ConversationHandler.END
+
+async def report_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel login flow"""
+    context.user_data.pop("report_api_id", None)
+    context.user_data.pop("report_api_hash", None)
+    context.user_data.pop("report_phone", None)
+    context.user_data.pop("report_client", None)
+    context.user_data.pop("report_2fa", None)
+    await update.message.reply_text("❌ Login cancelled.")
+    return ConversationHandler.END
 
 async def report_logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1423,7 +1481,7 @@ async def report_worker(user_id: int):
     targets = session.get("targets", [])
     max_limit = session.get("max_reports", REPORT_DEFAULT_MAX)
     speed = session.get("speed", "turbo")
-    interval = {"normal":2.0, "fast":1.0, "turbo":0.3}.get(speed, 0.3)
+    interval = {"normal": 2.0, "fast": 1.0, "turbo": 0.3}.get(speed, 0.3)
 
     client = await get_user_report_client(user_id)
     if not client:
@@ -1668,7 +1726,6 @@ def main():
         asyncio.run(init_all_dbs())
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
-        # Continue anyway - the bot might still work with some features
 
     REG_PROXY_MANAGER = RegProxyManager()
 
@@ -1719,7 +1776,7 @@ def main():
         logger.critical(f"Failed to build application: {e}")
         sys.exit(1)
 
-    # Add handlers
+    # Add command handlers
     application.add_handler(CommandHandler("start", module_start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("ping", ping))
@@ -1727,11 +1784,25 @@ def main():
     application.add_handler(CommandHandler("eval", eval_code))
     application.add_handler(CommandHandler("broadcast", broadcast))
     application.add_handler(CommandHandler("backup", backup))
+    
+    # Report login conversation handler
+    report_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("report_login", report_login_start)],
+        states={
+            REPORT_API_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, report_login_api_id)],
+            REPORT_API_HASH: [MessageHandler(filters.TEXT & ~filters.COMMAND, report_login_api_hash)],
+            REPORT_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, report_login_phone)],
+            REPORT_OTP: [MessageHandler(filters.TEXT & ~filters.COMMAND, report_login_otp)],
+        },
+        fallbacks=[CommandHandler("cancel", report_cancel)],
+    )
+    application.add_handler(report_conv_handler)
 
+    # Message handler for all text
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_global_text))
     application.add_handler(CallbackQueryHandler(global_callback_handler, pattern="^"))
 
-    # Start polling with better error handling
+    # Start polling
     try:
         logger.info("🚀 Mega Bot is starting...")
         application.run_polling()
@@ -1743,13 +1814,6 @@ def main():
 
 # ---------- Global Message Router ----------
 async def handle_global_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get("report_login_state") == "phone":
-        await report_login_phone(update, context)
-        return
-    elif context.user_data.get("report_login_state") == "otp":
-        await report_login_otp(update, context)
-        return
-
     if context.user_data.get("reg_waiting"):
         await reg_handle_text(update, context)
     elif context.user_data.get("ref_waiting"):
