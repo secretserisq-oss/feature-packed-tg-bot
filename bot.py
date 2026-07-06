@@ -82,7 +82,7 @@ logger = logging.getLogger("MegaBot")
 logger.setLevel(logging.INFO)
 
 # ---------- Environment Config ----------
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8693119356:AAFD5dhQUSKPTCxcsuf9b1uHlgLKmsGcVS0")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8996787632:AAFxuoXysrlhOVBgoC-MlbPETZOOMkJZ7ww")
 ADMIN_IDS = [int(x.strip()) for x in os.environ.get("ADMIN_IDS", "5888777479").split(",") if x.strip().isdigit()]
 
 # Module settings
